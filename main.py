@@ -101,7 +101,7 @@ def main():
         KEY = credentials['key']
 
     if ID and KEY:
-        asyncio.get_event_loop().run_until_complete(listen_for_commands(ID, KEY))
+        asyncio.run(listen_for_commands(ID, KEY))
 
 
 if __name__ == '__main__':
