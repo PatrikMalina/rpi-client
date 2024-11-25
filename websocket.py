@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 import websockets
 import psutil
@@ -6,6 +7,11 @@ import asyncio
 from time import time
 
 from settings import WEBSOCKET_URL
+
+DEVICE_ID = None
+WEBSOCKET = None
+
+IGNORE_COMMANDS = ["device_metrics", "status", "connected_devices", "script_log"]
 
 previous_stats = {
     "bytes_sent": 0,
@@ -59,16 +65,91 @@ async def send_device_info(websocket):
         await asyncio.sleep(1)
 
 
+def save_script(data):
+    try:
+        with open('script.sh', "w") as file:
+            file.write(data["content"])
+        print(f"Script saved successfully!")
+        return True
+    except Exception as e:
+        print(f"Failed to save the script: {e}")
+        return False
+
+
+async def run_script(websocket):
+
+    message = {"type": "broadcast", "command": "script_log", "device_id": DEVICE_ID, "data": ''}
+
+    try:
+        script_path = "./script.sh"
+        bash_path = "C:/Program Files/Git/bin/bash.exe"
+
+        print("Starting the script...")
+
+        # Start the subprocess
+        process = await asyncio.create_subprocess_exec(
+            bash_path, script_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        # Read the script's output line by line asynchronously
+        async for line in process.stdout:
+            line_decoded = line.decode().strip()
+            message["data"] = line_decoded
+            await websocket.send(json.dumps(message))
+
+        # Wait for the process to finish
+        return_code = await process.wait()
+
+        message["message"] = f"Script completed with return code {return_code}"
+        await websocket.send(json.dumps(message))
+
+        # Handle stderr if needed
+        async for error in process.stderr:
+            print(f"Error: {error.decode().strip()}")
+            message["message"] = f"Error: {error.decode().strip()}"
+            await websocket.send(json.dumps(message))
+
+    except Exception as e:
+        print(f"Failed to run script: {e}")
+        message["message"] = f"Failed to execute script: {e}"
+
+        await websocket.send(json.dumps(message))
+
+
+def current_device_commands(websocket, message):
+    if message.get("command") == "upload_to_client":
+        save_script(message.get("data"))
+
+    elif message.get("command") == "run_script":
+        sender_task = asyncio.create_task(run_script(websocket))
+
+
+
 async def listen_for_commands(device_id, device_key):
     uri = f"{WEBSOCKET_URL}/?id={device_id}&key={device_key}"
 
+    global DEVICE_ID, WEBSOCKET
+    DEVICE_ID = device_id
+
     async with websockets.connect(uri) as websocket:
+        WEBSOCKET = websocket
         sender_task = asyncio.create_task(send_device_info(websocket))
 
         try:
             while True:
                 message = json.loads(await websocket.recv())
-                print(f"Received command: {message.get("command")}")
+
+                if message.get("device_id") == str(device_id):
+
+                    current_device_commands(websocket, message)
+
+                elif message.get("command") in IGNORE_COMMANDS:
+                    continue
+
+                else:
+                    print(f"Received command: {message.get("command")}")
         finally:
             sender_task.cancel()
             await sender_task
