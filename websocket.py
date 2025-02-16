@@ -6,7 +6,7 @@ import psutil
 import asyncio
 from time import time
 
-from settings import WEBSOCKET_URL
+from settings import WEBSOCKET_URL, RECONNECT_DELAY
 
 DEVICE_ID = None
 WEBSOCKET = None
@@ -133,23 +133,43 @@ async def listen_for_commands(device_id, device_key):
     global DEVICE_ID, WEBSOCKET
     DEVICE_ID = device_id
 
-    async with websockets.connect(uri) as websocket:
-        WEBSOCKET = websocket
-        sender_task = asyncio.create_task(send_device_info(websocket))
-
+    while True:
         try:
-            while True:
-                message = json.loads(await websocket.recv())
+            print(f"Trying to connect to {WEBSOCKET_URL}")
+            async with websockets.connect(uri) as websocket:
+                print(f"Connected to {WEBSOCKET_URL}")
+                WEBSOCKET = websocket
+                sender_task = asyncio.create_task(send_device_info(websocket))
 
-                if message.get("device_id") == str(device_id):
+                try:
+                    while True:
+                        message = json.loads(await websocket.recv())
 
-                    current_device_commands(websocket, message)
+                        if message.get("device_id") == str(device_id):
+                            current_device_commands(websocket, message)
 
-                elif message.get("command") in IGNORE_COMMANDS:
+                        elif message.get("command") in IGNORE_COMMANDS:
+                            continue
+
+                        else:
+                            print(f"Received command: {message.get('command')}")
+
+                except (websockets.exceptions.ConnectionClosedError,
+                        websockets.exceptions.InvalidStatusCode,
+                        OSError, asyncio.TimeoutError) as e:
+                    print(f"Connection error: {e}")
+                    print(f"Retrying in {RECONNECT_DELAY} seconds...")
+                    await asyncio.sleep(RECONNECT_DELAY)
+
+                finally:
+                    sender_task.cancel()
+                    await sender_task
                     continue
 
-                else:
-                    print(f"Received command: {message.get("command")}")
-        finally:
-            sender_task.cancel()
-            await sender_task
+
+        except (websockets.exceptions.ConnectionClosedError,
+                websockets.exceptions.InvalidStatusCode,
+                OSError, asyncio.TimeoutError) as e:
+            print(f"Connection error: {e}")
+            print(f"Retrying in {RECONNECT_DELAY} seconds...")
+            await asyncio.sleep(RECONNECT_DELAY)
