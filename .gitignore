@@ -170,3 +170,4 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 device_credentials.json
+script.sh

@@ -1,10 +1,9 @@
-import json
-import subprocess
-
-import websockets
-import psutil
 import asyncio
+import json
 from time import time
+
+import psutil
+import websockets
 
 from settings import WEBSOCKET_URL, RECONNECT_DELAY
 
@@ -18,6 +17,7 @@ previous_stats = {
     "bytes_recv": 0,
     "timestamp": time(),
 }
+
 
 def calculate_network_usage():
     global previous_stats
@@ -43,6 +43,7 @@ def calculate_network_usage():
         "bytes_recv": round(bytes_recv, 2),
     }
 
+
 async def get_device_metrics():
     disk_io = psutil.disk_io_counters()
 
@@ -57,6 +58,7 @@ async def get_device_metrics():
 
     return metrics
 
+
 async def send_device_info(websocket):
     while True:
         device_metrics = await get_device_metrics()
@@ -68,7 +70,7 @@ async def send_device_info(websocket):
 def save_script(data):
     try:
         with open('script.sh', "w") as file:
-            file.write(data["content"])
+            file.write(data)
         print(f"Script saved successfully!")
         return True
     except Exception as e:
@@ -77,12 +79,11 @@ def save_script(data):
 
 
 async def run_script(websocket):
-
     message = {"type": "broadcast", "command": "script_log", "device_id": DEVICE_ID, "data": ''}
 
     try:
         script_path = "./script.sh"
-        bash_path = "C:/Program Files/Git/bin/bash.exe"
+        bash_path = "/bin/bash"
 
         print("Starting the script...")
 
@@ -126,6 +127,26 @@ def current_device_commands(websocket, message):
         sender_task = asyncio.create_task(run_script(websocket))
 
 
+async def start_lab(websocket, message):
+    data = message.get("data")
+    lab_id = data["lab_id"]
+    script_data = data["script_data"]
+
+    save_script(script_data)
+    sender_task = asyncio.create_task(run_script(websocket))
+
+    message = {
+        "command": "device_config_status",
+        "data": {
+            "success": True,
+            "lab_id": lab_id,
+        }
+    }
+
+    print("Starting lab...")
+
+    await websocket.send(json.dumps(message))
+
 
 async def listen_for_commands(device_id, device_key):
     uri = f"{WEBSOCKET_URL}/?id={device_id}&key={device_key}"
@@ -147,6 +168,9 @@ async def listen_for_commands(device_id, device_key):
 
                         if message.get("device_id") == str(device_id):
                             current_device_commands(websocket, message)
+
+                        elif message.get("command") == "start_lab":
+                            asyncio.create_task(start_lab(websocket, message))
 
                         elif message.get("command") in IGNORE_COMMANDS:
                             continue
