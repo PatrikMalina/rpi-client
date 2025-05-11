@@ -121,7 +121,7 @@ async def run_script(websocket):
 
         # Start the subprocess
         process = await asyncio.create_subprocess_exec(
-            bash_path, SCRIPT_PATH,
+            "sudo", bash_path, SCRIPT_PATH,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
