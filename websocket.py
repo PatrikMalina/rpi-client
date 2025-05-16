@@ -13,7 +13,7 @@ import websockets
 from settings import WEBSOCKET_URL, RECONNECT_DELAY, OUTPUT_DIR
 
 SCRIPT_PATH = "./script.sh"
-
+FULL_OUTPUT = ''
 script_task = None
 
 previous_stats = {
@@ -115,6 +115,8 @@ def save_script(data):
 async def run_script(websocket):
     message = {"command": DeviceCommands.SCRIPT_LOG, "data": ''}
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    global FULL_OUTPUT
+    FULL_OUTPUT = ''
 
     try:
         bash_path = "/bin/bash"
@@ -130,17 +132,22 @@ async def run_script(websocket):
         async for line in process.stdout:
             text = f"{get_timestamp()} {line.decode().strip()}"
             message["data"] = text
+            FULL_OUTPUT += f"{text}\n"
             await websocket.send(json.dumps(message))
 
         return_code = await process.wait()
 
-        message["data"] = f"{get_timestamp()} Script completed with return code {return_code}"
+        text = f"{get_timestamp()} Script completed with return code {return_code}"
+        FULL_OUTPUT += f"{text}\n"
+        message["data"] = text
         await websocket.send(json.dumps(message))
 
         # Handle stderr if needed
         async for error in process.stderr:
             print(f"Error: {error.decode().strip()}")
-            message["data"] = f"{get_timestamp()} Error: {error.decode().strip()}"
+            error = f"{get_timestamp()} Error: {error.decode().strip()}"
+            message["data"] = error
+            FULL_OUTPUT += f"{error}\n"
             await websocket.send(json.dumps(message))
 
     except Exception as e:
@@ -238,6 +245,10 @@ async def listen_for_commands(device_id, device_key):
 
                     elif command == DeviceCommands.STOP_LAB:
                         asyncio.create_task(stop_lab(websocket, data))
+
+                    elif command == DeviceCommands.SCRIPT_LOG:
+                        message = {"command": DeviceCommands.SCRIPT_LOG, "data": {"full": True, "text": FULL_OUTPUT}}
+                        await websocket.send(json.dumps(message))
 
                     else:
                         print(f"Received command: {command}")
